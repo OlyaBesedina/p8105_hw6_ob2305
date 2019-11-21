@@ -1,0 +1,114 @@
+---
+title: "p8105_hw6_ob2305"
+author: "Olya Besedina"
+data: "11/21/2019"
+output: github_document
+---
+  
+```{r setup, include=FALSE}
+library(tidyverse)
+library(viridis)
+library(modelr)
+library(mgcv)
+
+knitr::opts_chunk$set(
+ 	echo = TRUE,
+ 	warning = FALSE,
+ 	fig.width = 8, 
+   fig.height = 6,
+   out.width = "90%"
+ )
+
+options(
+   ggplot2.continuous.colour = "viridis",
+   ggplot2.continuous.fill = "viridis"
+ )
+
+ scale_colour_discrete = scale_colour_viridis_d
+ scale_fill_discrete = scale_fill_viridis_d
+
+ theme_set(theme_minimal() + theme(legend.position = "bottom"))
+```
+
+# Problem 1
+
+```{r, tidy dataset, include = FALSE}
+birthweight = read.csv(file = "./data/birthweight.csv")
+
+# check for missing data
+skimr::skim(birthweight)
+
+birthweight %>% 
+   pull(wtgain)
+
+birthweight_1 = birthweight %>% 
+   mutate(
+   wtgain = as.factor(wtgain))
+
+head(birthweight_1)
+```
+
+## Fit regression model
+
+```{r}
+my_model  = lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppbmi + smoken, data = birthweight_1)
+
+summary(my_model)
+my_model %>% 
+  broom::glance()
+# adj R^2 0.7106
+# AIC 61130
+```
+
+Residuals and fitted values
+
+```{r}
+# add residuals
+birthweight = modelr::add_residuals(birthweight, my_model) 
+# add predictions
+birthweight = modelr::add_predictions(birthweight, my_model)
+
+birthweight%>%
+  ggplot(aes(x = pred, y = resid))+
+  geom_point(color = "purple", alpha = .5)+
+   ylim(-1000, 1000)
+```
+
+The plot of residuals against fitted values shows distribution of data points around 0. 
+
+
+## Compare to two other model:
+
+```{r}
+model_1 = lm(bwt ~ blength + gaweeks, data = birthweight)
+summary(model_1)
+model_1 %>% 
+  broom::glance()
+# adj R^2 0.5767
+# AIC 62771
+
+
+model_2 = lm(bwt ~ babysex*blength*bhead, data = birthweight)
+summary(model_2)
+model_2 %>% 
+  broom::glance()
+# adj R^2 0.6844
+# AIC 61501
+```
+
+## Cross validation
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
