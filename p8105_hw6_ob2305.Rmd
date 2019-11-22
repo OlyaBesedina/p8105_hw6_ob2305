@@ -32,6 +32,8 @@ options(
 
 # Problem 1
 
+Birth weight dataset contains 4342 observations, 22 variables and no missing values. Four variables were recoded as factors, those variables are `babysex, frace, malform and mrace`.
+
 ```{r, tidy dataset}
 birthweight = read.csv(file = "./data/birthweight.csv") %>% 
    janitor::clean_names() %>% 
@@ -43,10 +45,6 @@ birthweight = read.csv(file = "./data/birthweight.csv") %>%
 
 # check for missing data
 skimr::skim(birthweight)
-
-birthweight_1 = birthweight %>% 
-   mutate(
-   wtgain = as.factor(wtgain))
 ```
 
 ## Fit regression model
