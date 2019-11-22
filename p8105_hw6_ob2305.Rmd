@@ -9,7 +9,7 @@ output: github_document
 library(tidyverse)
 library(viridis)
 library(modelr)
-library(mgcv)
+library(patchwork)
 
 knitr::opts_chunk$set(
  	echo = TRUE,
@@ -32,37 +32,46 @@ options(
 
 # Problem 1
 
-```{r, tidy dataset, include = FALSE}
-birthweight = read.csv(file = "./data/birthweight.csv")
+```{r, tidy dataset}
+birthweight = read.csv(file = "./data/birthweight.csv") %>% 
+   janitor::clean_names() %>% 
+   mutate(
+      babysex = as.factor(babysex),
+      frace = as.factor(frace),
+      malform = as.factor(malform),
+      mrace = as.factor(mrace))
 
 # check for missing data
 skimr::skim(birthweight)
 
-birthweight %>% 
-   pull(wtgain)
-
 birthweight_1 = birthweight %>% 
    mutate(
    wtgain = as.factor(wtgain))
-
-head(birthweight_1)
 ```
 
 ## Fit regression model
 
-```{r}
-my_model  = lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppbmi + smoken, data = birthweight_1)
+Regression model was first fit for the outcome of interest - baby birthweight in grams - with all the variables in the `birthweight` dataset. Non-significant predictors were removed one-by-ne and model was refitted; this process was repeated untill only significant predictors were left in the model. Those predictors are: `babysex, bhead, blength, delwt, fincome, gaweeks, mheight, momage, mrace, parity, ppbmi, smoken`. 
 
-summary(my_model)
-my_model %>% 
-  broom::glance()
-# adj R^2 0.7106
-# AIC 61130
+```{r, my regression model}
+my_model  = lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppbmi + smoken, data = birthweight)
+
+adj_r_sq_mm = my_model %>% 
+   broom::glance() %>% 
+   pull(adj.r.squared)
+
+aic_mm = 
+   my_model %>% 
+   broom::glance() %>% 
+   pull(AIC)
 ```
 
-Residuals and fitted values
+Model diagnostics were performed using `broom::glance`. Adjusted r-squared for the obtained model is `r adj_r_sq_mm` and AIC is `r aic_mm`
 
-```{r}
+
+Varience is depicted by residuals and fitted values, which are distributed around 0 and show somewhat constant varience. Residuals were cut off at 1000 to exclude extreme outliers.
+
+```{r, residuals and fitted values}
 # add residuals
 birthweight = modelr::add_residuals(birthweight, my_model) 
 # add predictions
@@ -71,39 +80,160 @@ birthweight = modelr::add_predictions(birthweight, my_model)
 birthweight%>%
   ggplot(aes(x = pred, y = resid))+
   geom_point(color = "purple", alpha = .5)+
+   # cut off at 1000 to exclude extreme outliers
    ylim(-1000, 1000)
 ```
 
-The plot of residuals against fitted values shows distribution of data points around 0. 
 
-
-## Compare to two other model:
+## Compare to two other model
 
 ```{r}
 model_1 = lm(bwt ~ blength + gaweeks, data = birthweight)
-summary(model_1)
+
 model_1 %>% 
   broom::glance()
-# adj R^2 0.5767
-# AIC 62771
-
 
 model_2 = lm(bwt ~ babysex*blength*bhead, data = birthweight)
 summary(model_2)
 model_2 %>% 
   broom::glance()
-# adj R^2 0.6844
-# AIC 61501
 ```
 
 ## Cross validation
 
+Cross validation of birth weight dataset was performed 100 times using `modelr::crossv_mc`. Linear regression was fit for each sample and rmse were compared visually in violin plot. 
 ```{r}
+cv_df = 
+  crossv_mc(birthweight, 100)
 
+# convert every list to dataframe
+cv_df =
+  cv_df %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+cv_results = 
+   cv_df %>% 
+   mutate(
+      my_model = map(train, ~my_model),
+      model_1 = map(train, ~ model_1),
+      model_2 = map(train, ~ model_2),
+      
+      rmse_my_model = map2_dbl(my_model, test, ~rmse(model = .x, data = .y)),
+      rmse_model_1 = map2_dbl(model_1, test, ~rmse(model = .x, data = .y)),
+      rmse_model_2 = map2_dbl(model_2, test, ~rmse(model = .x, data = .y)))
 ```
 
+A violin plot depicts distribution of rmse for each model from 100 training - testing splits. Based on the plot `my_model` is the best model among the 3 models depicted, because it has the lowest rmse values. 
+
+```{r}
+cv_results %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse, fill = model)) + 
+  geom_violin(alpha = .5)
+```
+
+# Problem 2
+
+```{r, load weather dataset}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+Weather dataset was obtained from NOAA via rnoaa pachage. It contains 365 observations and 6 variables `r names(weather_df)`.
 
 
+Bootstraping `weather_df` 5000 times using `modelr` package.
+
+```{r, bootstraping weather_df}
+#dataset for log(b0*b1)
+bootstrap_beta = 
+   weather_df %>% 
+   modelr::bootstrap(n = 5000) %>%
+   mutate(
+      models = map(strap, ~lm(tmax ~ tmin, data = .)),
+      # obtain beta0 and beta1 using broom::tidy
+      results = map(models, broom::tidy)
+   ) %>% 
+   unnest(results) %>% 
+   select(.id:estimate, -models) %>% 
+   pivot_wider(
+      names_from = "term",
+      values_from = "estimate") %>% 
+   rename(intercept = '(Intercept)') %>% 
+   mutate(
+      log_b0_b1 = log(intercept*tmin)
+   ) %>% 
+   select(.id, log_b0_b1)
+
+#dataset for r^2
+bootstrap_r2 = 
+   weather_df %>% 
+   modelr::bootstrap(n = 5000) %>%
+   mutate(
+      models = map(strap, ~lm(tmax ~ tmin, data = .)),
+      # obtain r^2 values using broom::glance
+      results = map(models, broom::glance)
+   ) %>% 
+   unnest(results) %>% 
+   select(.id, r.squared)
+
+# join two datasets
+bootstrap_data = 
+   inner_join(bootstrap_beta, bootstrap_r2, by = ".id") %>% 
+   janitor::clean_names()
+```
+
+The plot below depicts distribution for the estimates obtained from bootstraping. 
+
+* Distribution of R-squared does ~N distribution, but is slightly right skewed. The average R-squared value for the 5000 fitted linear regression is about 47%, meaning that about 47% values of `tmax` is explained by the value of `tmin`. 
+* Distribution of log(beta0*beta1) ~N distribution with the average value of 16. 
+
+```{r}
+# density plot of r^2
+rsq = 
+   bootstrap_data%>%
+   ggplot(aes(x = r_squared))+
+   geom_density(fill = "yellow", alpha = .7)+
+   labs(
+      title = "Distribution of R^2",
+      x = "R^2",
+      y = "Density",
+      caption = "Data from NOAA via rnoaa pachage"
+   )
+
+# density plot of log(b0*b1)
+log_b0_b1 = 
+   bootstrap_data%>%
+   ggplot(aes(x = log_b0_b1))+
+   geom_density(fill = "pink", alpha = .7)+
+   labs(
+      title = "Distribution of log(beta0 * beta1)",
+      x = "log(beta0 * beta1)",
+      y = "Density",
+      caption = "Data from NOAA via rnoaa pachage")
+
+rsq + log_b0_b1
+```
+
+The 95% Confidence Interval for R-squared estimates is between `r quantile(bootstrap_data$r_squared, probs = 0.025)` and `r quantile(bootstrap_data$r_squared, probs = 0.975)`. 
+
+The 95% Confidence Interval for log(beta0 * beta1) is between `r quantile(bootstrap_data$log_b0_b1, probs = 0.025)` and `r quantile(bootstrap_data$log_b0_b1, probs = 0.975)`
 
 
 
